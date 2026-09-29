@@ -1,0 +1,2 @@
+{"name":"circloset","version":"3.0.0","private":true,"scripts":{"start":"node server.js","start:static":"node server-static.js","seed":"node seed.js"},
+"dependencies":{"bcryptjs":"^2.4.3","cookie-parser":"^1.4.6","dotenv":"^16.4.5","express":"^4.19.2","google-auth-library":"^9.11.0","jsonwebtoken":"^9.0.2","mongoose":"^8.5.0","multer":"^1.4.5-lts.1"}}
