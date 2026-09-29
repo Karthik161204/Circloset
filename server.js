@@ -3,11 +3,15 @@ const express=require('express'),mongoose=require('mongoose'),bcrypt=require('bc
 const{OAuth2Client}=require('google-auth-library'),M=require('./models'),pay=require('./services/payment');
 const SECRET=process.env.JWT_SECRET;if(!SECRET||SECRET.length<16){console.error('Set JWT_SECRET (16+ chars) in .env');process.exit(1)}
 const app=express(),ACT=['confirmed','picked_up'],gc=new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+const uploadRoot=process.env.VERCEL?path.join('/tmp','circloset-uploads'):path.join(__dirname,'uploads');
+let dbConnection;
+const connectDb=()=>{if(!dbConnection)dbConnection=mongoose.connect(process.env.MONGODB_URI||'mongodb://127.0.0.1:27017/circloset').catch(e=>{dbConnection=undefined;throw e});return dbConnection};
 app.use(express.json({limit:'100kb'}),cookie());
+app.use('/api',(q,s,n)=>connectDb().then(()=>n()).catch(e=>{console.error('MongoDB connection failed:',e.message);bad(s,'Database unavailable.',503)}));
 /* ---- helpers ---- */
 const h=f=>(q,s,n)=>Promise.resolve(f(q,s,n)).catch(n),bad=(s,m,c=400)=>s.status(c).json({error:m});
 const EXT={'image/jpeg':'.jpg','image/png':'.png','image/webp':'.webp','application/pdf':'.pdf'};
-const mk=(sub,types,mb)=>multer({storage:multer.diskStorage({destination:(q,f,cb)=>{const d=path.join(__dirname,'uploads',sub);fs.mkdirSync(d,{recursive:true});cb(null,d)},filename:(q,f,cb)=>cb(null,crypto.randomUUID()+EXT[f.mimetype])}),
+const mk=(sub,types,mb)=>multer({storage:multer.diskStorage({destination:(q,f,cb)=>{const d=path.join(uploadRoot,sub);fs.mkdirSync(d,{recursive:true});cb(null,d)},filename:(q,f,cb)=>cb(null,crypto.randomUUID()+EXT[f.mimetype])}),
 limits:{fileSize:mb*1048576,files:6},fileFilter:(q,f,cb)=>types.includes(f.mimetype)?cb(null,true):cb(new Error('BAD_FILE'))});
 const upId=mk('identity',['image/jpeg','image/png','application/pdf'],3),upImg=mk('clothing',['image/jpeg','image/png','image/webp'],4);
 const rm=f=>f&&fs.unlink(f.path,()=>{});
@@ -43,11 +47,11 @@ app.put('/api/users/profile',auth(),upImg.single('profileImage'),h(async(q,s)=>{
 if(b.phone){if(!/^[6-9]\d{9}$/.test(b.phone))return bad(s,'Enter a valid 10-digit mobile number.');u.phone=b.phone}
 for(const k of['house','street','area','city','state','pin'])if(b[k])u.address[k]=b[k];if(q.file)u.profileImage='/uploads/clothing/'+q.file.filename;await u.save();s.json({user:me(u)})}));
 app.post('/api/users/identity',auth(),upId.single('identity'),h(async(q,s)=>{const u=q.user;if(u.identityStatus=='verified'){rm(q.file);return bad(s,'Your identity is already verified.')}if(!q.file)return bad(s,'Please choose a file.');
-if(u.identityFile)fs.unlink(path.join(__dirname,'uploads/identity',u.identityFile),()=>{});u.identityFile=q.file.filename;u.identityType=q.body.identityType||u.identityType;u.identityStatus='pending';await u.save();s.json({user:me(u)})}));
+if(u.identityFile)fs.unlink(path.join(uploadRoot,'identity',u.identityFile),()=>{});u.identityFile=q.file.filename;u.identityType=q.body.identityType||u.identityType;u.identityStatus='pending';await u.save();s.json({user:me(u)})}));
 app.get('/api/users/:id/identity',auth(),h(async(q,s)=>{if(q.user.role!='admin'&&q.user.id!=q.params.id)return bad(s,'You don\'t have access to that.',403);
-const u=await M.User.findById(q.params.id);if(!u||!u.identityFile)return bad(s,'No document on file.',404);s.sendFile(path.join(__dirname,'uploads/identity',u.identityFile))}));
+const u=await M.User.findById(q.params.id);if(!u||!u.identityFile)return bad(s,'No document on file.',404);s.sendFile(path.join(uploadRoot,'identity',u.identityFile))}));
 /* ---- clothing ---- */
-app.use('/uploads/clothing',express.static(path.join(__dirname,'uploads/clothing'),{maxAge:'7d'})); // identity folder is NOT served
+app.use('/uploads/clothing',express.static(path.join(uploadRoot,'clothing'),{maxAge:'7d'})); // identity folder is NOT served
 const optAuth=h(async(q,s,n)=>{try{q.user=await M.User.findById(jwt.verify(q.cookies.token,SECRET).id)}catch(e){}n()});
 const parseCl=(b,files)=>{const t=b.listingType,d={name:(b.name||'').trim(),category:b.category,size:b.size,brand:b.brand,color:b.color,style:b.style,condition:b.condition,description:b.description,listingType:t,
 pickupLocation:{address:b.pickupAddress,area:b.pickupArea,city:b.pickupCity,latitude:+b.latitude,longitude:+b.longitude}};
@@ -132,4 +136,5 @@ app.get('*',(q,s)=>s.sendFile(path.join(__dirname,'public/index.html')));
 app.use((e,q,s,n)=>{const C={LIMIT_FILE_SIZE:'That file is too large.',BAD_FILE:'Unsupported file type. Use JPG, PNG or WebP (PDF also allowed for ID).',LIMIT_UNEXPECTED_FILE:'Too many or unexpected files.'};
 if(C[e.code]||C[e.message])return bad(s,C[e.code]||C[e.message]);if(e.code===11000)return bad(s,'An account with this email already exists.',409);if(e.name=='ValidationError'||e.name=='CastError')return bad(s,'Please check the details you entered.');
 if(/token|audience/i.test(e.message||''))return bad(s,'Sign-in failed. Please try again.',401);console.error(e);bad(s,'Something went wrong. Please try again.',500)});
-mongoose.connect(process.env.MONGODB_URI||'mongodb://127.0.0.1:27017/circloset').then(()=>app.listen(process.env.PORT||3000,()=>console.log('CIRCLOSET API + app on http://localhost:'+(process.env.PORT||3000)))).catch(e=>{console.error('MongoDB connection failed:',e.message);process.exit(1)});
+if(require.main===module)connectDb().then(()=>app.listen(process.env.PORT||3000,()=>console.log('CIRCLOSET API + app on http://localhost:'+(process.env.PORT||3000)))).catch(e=>{console.error('MongoDB connection failed:',e.message);process.exit(1)});
+module.exports=app;

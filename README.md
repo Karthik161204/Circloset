@@ -51,3 +51,13 @@ Demo logins: admin@circloset.com · user@circloset.com · seller@circloset.com (
 - Payments are mocked in `services/payment.js` (10% commission, `COMMISSION_PCT`); plug Razorpay/Stripe in there.
 
 **Status:** the backend is complete but the browser UI (`app.js`/`features.js`) still runs on its localStorage demo data. `public/api.js` is ready for wiring each screen to the API.
+
+## Spring Boot backend
+The `backend/` directory contains the Java migration foundation using Spring Web, Security, Data JPA/Hibernate, PostgreSQL via Supabase, Redis, STOMP WebSocket, and REST APIs. See [backend/README.md](backend/README.md) for local setup. The existing Node backend remains available while routes and authentication are migrated.
+
+## Deploy to Vercel
+1. Push this repository to GitHub and import it in Vercel, or run `npx vercel` from the project directory.
+2. Set these Vercel environment variables: `MONGODB_URI` and a random `JWT_SECRET` with at least 16 characters. Add `GOOGLE_CLIENT_ID` if Google sign-in is enabled.
+3. Use a MongoDB provider reachable from Vercel, such as MongoDB Atlas. Run `npm run seed` locally against the same `MONGODB_URI` if demo data is needed.
+
+The Vercel function writes uploaded files to temporary storage. For production, replace the local Multer storage with durable object storage such as Vercel Blob or S3; files in `/tmp` can disappear between invocations.
